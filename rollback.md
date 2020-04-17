@@ -3,20 +3,11 @@
 Rollbacking is a important feature of software-updates solutions. Automatic rollbacking is
 even better. This allows for error handling to be under-the-hood without having to worry
 about manually resetting your target to its previous state. In addition, the target can
-continue its tasks if it has properly rollbacked.   
+continue its tasks if it has properly rollbacked.
 
-## Changing the client feedback behavior
-
-The FullMetalUpdate client was regularly polling the server and downloading updates when
-there was one. After completing the download, the client “committed” the update to the
-corresponding OSTree repo (containers or OS) and then sent the feedback right afterwards.
-The problem with this solution is that we don’t know if the new update has properly
-started and if it is properly running without problems on the target.
-
-This was an issue that needed to be fixed, especially since we want to send an error
-message if the client has rollbacked onto the previous version because of a failure in the
-new one. Let’s detail the behavior of the rollback for OS and container upgrades  while
-considering this change of functionality in the client.
+Here we will stufy how FullMetalUpdate is able to rollback when the OS boot process fails
+several times, and a solution to rollback containers when the container application fails
+at initialization.
 
 ## Rollbacking the OS in case of boot failure
 
@@ -90,7 +81,8 @@ elif trials < 5:
   boot
 else
   replace bootargs by bootargs2
-  delete init_var
+  replace kernel_image by kernel_image2
+  replace ramdisk_image by ramdisk_image2
   save u-boot environment
   boot
 end if
@@ -107,11 +99,11 @@ multiple things :
  1. Deploy the new deployment in OSTree
  1. **Delete  the `init_var` variable**. This will allow U-boot to start from scratch and
       re-initialize its variables.
- 1. Write a JSON file stored in `/var/local/reboot_data.json` which typically looks like this : 
+ 1. Write a JSON file stored in `/var/local/fullmetalupdate/reboot_data.json` which
+    typically looks like this : 
       ```json
       {
          "action_id":"24",
-         "feedback_on_next_execution":true,
          "status_execution":1,
          "status_result":1,
          "msg":"OS fullmetalupdate-os-imx8mqevk v.202003190841 Deployment succeed"
@@ -120,9 +112,9 @@ multiple things :
       This step is crucial as we need to store the information to **send the feedback on the next
       reboot**.
 
-      `action_id` is the current deployment’s identifier. `feedback_on_next_execution` is a
-      boolean used by the client after the reboot, here set to true. `status_execution` and
-      `status_result` are two feedback statuses, and `msg` is the message sent to the server.
+      `action_id` is the current deployment’s identifier.  `status_execution` and
+      `status_result` are two feedback statuses, and `msg` is the message sent to the
+      server.
 
 The client **does not give feedback yet**. Hence, the Hawkbit server considers the deployment
 as pending, and waits for a feedback.
@@ -136,34 +128,38 @@ variable. The target will then boot on either the new or the old deployment.
 #### The FullMetalUpdate client
 
 The client is executed at bootup with a systemd service. At initialization the client
-executes `mark_os_successful()` which sets the U-boot `success` variable to 1 so that the
-rollback conditions don’t execute on next reboot.
+executes `mark_os_successful()` which sets the U-boot `success` variable to 1 so that
+U-boot knows that the OS has successfully booted on next reboots.
 
 The client polls the server, and since the server is still in a deployment phase, the
 client will execute `process_deployment()` again. Here, the client determines it’s an OS
-update again, and will : 
+update again **because `reboot_data.json` exists**, and will : 
 
  1. Execute `feedback_for_next_deployment()`. This method does a few important things : 
-     - Load the json file previously written
+     - Load the json file previously written.
      - Execute `check_for_rollback()`. This method checks if the target has rollbacked by looking
        if there is a pending deployment (i.e. the deployment which failed five times). If so, it
-       undeploys it and returns `True` – and returns `False` otherwise. This method also rewrites
-       `reboot_data.json` with `feedback_for_next_execution` to `False` for the next update.
-     - Using `check_for_rollback()`'s value, change the result status and the message sent to the
+       undeploys the failed deployment and returns `True` – it returns `False` otherwise. 
+     - Using `check_for_rollback()`'s return value, change the result status and the message sent to the
        server to "failure" if the system has rollbacked
-     - Return the feedback data
- 1. Using `feedback_for_next_deployment()`'s return value, the client sees that
-      `feedback_on_next_execution` is set to `true`, and feedbacks the server using the previously
-      returned feedback data. It will also return from `process_deployment()` as we do not want to
-      pursue the deployment process.
+     - **Delete** `reboot_data.json`, so that on the next OS deployment the client knows
+       that it should proceed normally to the update
+     - Return the feedback data, and a boolean telling the client that it has to feedback
+       the server
+ 1. Using `feedback_for_next_deployment()`'s return values, the client feedbacks the server
+    using the returned feedback data. It will also return from `process_deployment()` as
+    we do not want to pursue the deployment process.
 
 #### Notes : 
 
- - `feedback_for_next_deployment()` is executed at every execution of `process_deployment()`
+ - `feedback_for_next_deployment()` is executed at every execution of `process_deployment()` :
+    - If `reboot_data.json` does not exist, the client pulls the update, deploys it, creates
+      `reboot_data.json`, and reboot
+    - If the file exists, we are in the former case and the client feedbacks without
+      updating
  - If the target has never been updated before, `reboot_data.json` does not exist
-     yet. `feedback_for_next_deployment()` handles this exception by returning a pseudo feedback
-     data, containing only `feedback_for_next_execution` set to `False`. The file will be then
-     written at the end of the deployment phase.
+     yet. The client will proceed to the update normally, and write `reboot_data.json`
+     before rebooting
  - `reboot_data.json` is written in `/var` because this directory is not modified across
      deployments with OSTree
 
@@ -174,7 +170,7 @@ update again, and will :
 ### systemd's notify services
 
 In FullMetalUpdate, all containers are started with systemd through the use of services.
-The allows for proper life cycle, CGroups, and the usage of the great API systemd is offering
+This allows for proper life cycle, CGroups, and the usage of the great API systemd is offering
 to manage services. Thus, runc containers are started with a [service file][sd_service_url]
 which can be configured to start/stop the container and *execute commands after these
 jobs*. This last point is important as it is the core of the FMU's rollback feature for
@@ -254,11 +250,12 @@ The recipes will also need to set `NOTIFY` to `"1"`. This basically turns the no
 feature "on" for the container – under the assumption that you have properly configured it.
 But also note that `AUTOSTART` and `TIMEOUT` are also **required variable** when `NOTIFY`
 is set :
- - `AUTOSTART` should be set to `"1"`
+ - `AUTOSTART` should be set to `"1"`. If set to `"0"`, the build will fail. If it isn't
+     set, it will be automatically set to `"1"`
  - `TIMEOUT` should be set to a delay value (in seconds), and it should be larger than
      `TimeoutStartSec=` in the service file. This delay is how much the client will
      ultimately wait until considering the deployment as failed (see the [How it
-     works](#how-it-works) section)
+     works](#how-it-works) section). The build will fail is this variable is not set.
 
 ### How it works
 
@@ -286,14 +283,13 @@ the target goes through :
     when the distribution implements the rollback feature, `0` otherwise) and `timeout`,
     the delay [mentioned previously](#adapt-the-recipes). These are the two variables set
     in the recipes.
- 1. Since `notify` is set to `1`, it does two things :
-     - it creates a Unix socket that will be used to receive a message from systemd
-     - it **starts a thread** and passes the information about the deployment (the socket,
-         the revision sha, autostart, autoremove…) to the thread. This thread will wait on
-         the socket for an incoming message from systemd
  1. The client triggers the update : service is stopped if pre-existing, data is pulled
-    from the remote repo, container is checked out to the new revision, and the service is
-    started again
+    from the remote repo, container is checked out to the new revision.
+
+    Right before starting the container service, the client **starts a thread** and passes
+    the information about the deployment (the socket, the revision sha, autostart,
+    autoremove…) to the thread. This thread will wait on a newly created socket for an
+    incoming message from systemd.
  1. The service starts the main process running in the container
  1. The process initializes and sends the `READY` flag to systemd
  1. Systemd receives the flag and executes the `ExecStartPost=` command, that will itself
