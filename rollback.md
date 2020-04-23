@@ -5,7 +5,7 @@ even better. This allows for error handling to be under-the-hood without having 
 about manually resetting your target to its previous state. In addition, the target can
 continue its tasks if it has properly rollbacked.
 
-Here we will stufy how FullMetalUpdate is able to rollback when the OS boot process fails
+Here we will study how FullMetalUpdate is able to rollback when the OS boot process fails
 several times, and a solution to rollback containers when the container application fails
 at initialization.
 
@@ -163,7 +163,21 @@ update again **because `reboot_data.json` exists**, and will :
  - `reboot_data.json` is written in `/var` because this directory is not modified across
      deployments with OSTree
 
+### Yocto related files
+
+You can find the U-boot script responsible for checking/incrementing/loading variables and
+loading the initramfs and kernel images in
+`meta-fullmetalupdate-extra/dynamic-layers/<machine-layer-name>/recipes-bsp` where
+`<machine-layer-name>` is the layer where U-boot recipes originate from. You will also
+find there `bbappend`s used to apply the script and configure `u-boot` as well as
+`u-boot-fw-utils` – a utility used to read/write U-boot's environment from the operating
+system.
+
+Taking the iMX8mqevk for instance, the script is located in
+[`dynamic-layers/freescale-layer/recipes-bsp/bootfiles/imx8mqevk/uEnv.txt`][imx8mqevk_uEnv].
+
 [ostree_comment_on_rollback]: https://github.com/ostreedev/ostree/issues/1808#issuecomment-459372967
+[imx8mqevk_uEnv]: https://github.com/FullMetalUpdate/meta-fullmetalupdate-extra/blob/warrior/dynamic-layers/freescale-layer/recipes-bsp/bootfiles/imx8mqevk/uEnv.txt
 
 ## Rollbacking containers
 
@@ -317,7 +331,7 @@ The container may fail for multiple reasons :
 
 In the first three cases, `ExecStopPost=` is executed. The command executed in
 `ExecStopPost=` is given `SERVICE_RESULT`, `EXIT_CODE` and `EXIT_STATUS` as environment
-variables, whereas `ExecStartPost=` does not give any of these – this is how we
+variables, whereas `ExecStartPost=` is not given any of these – this is how we
 differentiate the two commands and execute the same script.
 
 For the first three cases, the results are sent to Hawkbit. This is what they look like :
@@ -343,7 +357,16 @@ In the case where the client has not received the datagram even after the
 `TimeoutStartSec=` delay, the socket times out after the `TIMEOUT` recipes' delay. This
 would not happen often, but in this case the client will still rollback the container and
 let the server know that the socket timed out.
+ 
+### Yocto related files
+
+To demonstrate the feature, an example notify container can be found in
+[`meta-fullmetalupdate-extra/recipes-containers/container-sd-notify`][notify_example]. It
+contains files configured to use the feature, and the example is a functional
+implementation of the container. In this case, `systemd-notify` is executed from
+`entry.sh`, but it could be executed by any program run by `entry.sh`.
 
 [sd_service_url]: https://www.freedesktop.org/software/systemd/man/systemd.service.html
 [sd_notify_url]: https://www.freedesktop.org/software/systemd/man/sd_notify.html
 [systemd-notify_url]: https://www.freedesktop.org/software/systemd/man/systemd-notify.html
+[notify_example]: https://github.com/FullMetalUpdate/meta-fullmetalupdate-extra/tree/warrior/recipes-containers/container-sd-notify
