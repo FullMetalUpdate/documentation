@@ -9,29 +9,27 @@
  1. **U-boot boot sequence :**
 
      1. Flash, serial console, Ethernet MAC Address (etc.) are configured
-     1. Environment variables are loaded from non-volatile memory (allows for configuration)
-     1. A delay is added for any user to enter the U-boot shell (usually a few
-        seconds, can be configured by the `bootdelay` env. variable)
-     1. A custom u-boot script does several things : 
-         1. It declares custom kernel boot arguments (`bootargs`) : the ostree root, a
-            ramdisk root, a ramdisk size along with other arguements such as the rootfs
-            type (e.g. ext4) and mode (ro/rw)
-         1. It loads the OSTree script
-         1. It declares a custom boot command that sets the previously declared kernel
-            arguments, loads the kernel and the ramdisk from memory
-        > *Note :* 
-        >
-        > This custom environment is written in the
-        > `meta-fullmetalupdate-extra/…/recipes-bsp/bootfiles/<machine>/uEnv.txt`. A important thing to note
-        > is that this script is indeed loaded at boot time, but you’ll also find a `uEnv.txt`
-        > file in `/boot/loader/uEnv.txt` when the device has booted. This environment is also
-        > **loaded at boot time** thanks to the command `mmc ${bootmmc} $loadaddr
-        > /boot/loader/uEnv.txt; env import -t loadaddr $filesize` ran inside the yocto script.
-        > 
-        > This allows to run a custom script from written in our layerside and also load
-        > the OSTree script which will determine on which deployment it will boot.
-     1. The initramfs image is loaded (named `initramfs-ostree-image-<machine>`)
-     1. The kernel is loaded and the execution is passed to the kernel
+     1. A minimal bootscript called `boot.scr` is executed and is used only to load a
+        **custom** script called `uEnv.txt`, written by us. These two scripts (the minimal
+        one and the custom one) are both defined in
+        [meta-fullmetalupdate-extra][meta_fmu_e] in the dynamic-layers folder. Those are
+        both handled by the `imx-bootfiles.bb` recipe.
+     1. The custom `uEnv.txt` u-boot script does several things : 
+        - It defines the proper storage interfaces and addresses (`bootmmc`, `bootiaddr`…)
+        - It defines multiple boot commands (`bootcmd*`) which all serve different
+          purposes :
+           - `bootcmd` is the main boot command : it contains conditional branches used to
+             boot either onto the current deployment or the rollback deployment. It also
+             execute the ostree boot command `bootcmd_otenv`
+           - `bootcmd_otenv` is used to load OStree environment variables, needed by
+             OStree to boot on the proper deployment. Note that this command imports
+             theses variables from **another `uEnv.txt`** which **totally differs** from
+             our custom one, defined in Yocto. This `uEnv.txt` is defined in
+             `/boot/loader/uEnv.txt` and written by OSTree when staging commits. Please
+             see the [OSTree documentation][ostreedoc_boot] for more info.
+           - When this script runs, it will execute these different commands and the
+             kernel, ramdisk image, device tree blob will be loaded. The execution is then
+             passed to the kernel.
 
  1. **Kernel boot sequence :**
 
@@ -47,9 +45,6 @@
     >
     >    It contains interesting arguments such as the `ostree=` which is parsed by OSTree
     >    to determine the current deployment.
-    >
-    >  - the kernel arguments are written both from our `uEnv.txt` and also from the OSTree
-    >    `uEnv.txt`.
 
  1. **OSTree initrd script :**
     
@@ -62,15 +57,22 @@
 
  1. **systemd :**
     
-    systemd, the init manager, does his usual job : starting the usual target units, but also start the
-    FullMetalUpdate client with a custom service file (which is found
+    systemd, the init manager, does his usual job : starting the usual target units, but
+    also start the FullMetalUpdate client with a custom service file (which is found
     [here][fmu_service]).
+
+ 1. **Client initialization :**
+
+    The client initializes the container ostree repo and starts the different preinstalled
+    containers.
 
 ## Useful resources : 
  - `man bootup`, `man boot`, `man bootparams`
  - https://ostree.readthedocs.io/
  - https://www.denx.de/wiki/U-Boot/Documentation
 
+[meta_fmu_e]: https://github.com/FullMetalUpdate/meta-fullmetalupdate-extra
+[ostreedoc_boot]: https://ostree.readthedocs.io/en/latest/manual/deployment#the-system-boot
 [ostreedoc_syslayout]: https://ostree.readthedocs.io/en/latest/manual/adapting-existing/#system-layout
 [metaupdater_script]: https://github.com/advancedtelematic/meta-updater/blob/master/recipes-sota/ostree-initrd/files/init.sh
 [fmu_service]: https://github.com/FullMetalUpdate/meta-fullmetalupdate/blob/warrior/recipes-fullmetalupdate/fullmetalupdate/files/fullmetalupdate.service
