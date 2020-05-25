@@ -12,8 +12,9 @@
      1. A minimal bootscript called `boot.scr` is executed and is used only to load a
         **custom** script called `uEnv.txt`, written by us. These two scripts (the minimal
         one and the custom one) are both defined in
-        [meta-fullmetalupdate-extra][meta_fmu_e] in the dynamic-layers folder. Those are
-        both handled by the `imx-bootfiles.bb` recipe.
+        [meta-fullmetalupdate-extra][meta_fmu_e] in the dynamic-layers folder. What those
+        files contain and how they are handled is specific to the board, but they will
+        serve the same purpose.
      1. The custom `uEnv.txt` u-boot script does several things : 
         - It defines the proper storage interfaces and addresses (`bootmmc`, `bootiaddr`…)
         - It defines multiple boot commands (`bootcmd*`) which all serve different
