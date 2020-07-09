@@ -10,6 +10,7 @@ Subjects currently covered by the documentation:
  - [How OS and container rollbacking works](rollback.md)
  - [Benchmarking statistics of the project](benchmark.md)
  - [How to add new target to Hawkbit](add-targets-to-hawkbit.md)
+ - [How to add a supported board on FullMetalUpdate](how-to-add-support.md)
 
 # Contribute
 
