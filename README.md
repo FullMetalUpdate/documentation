@@ -9,7 +9,8 @@ Subjects currently covered by the documentation:
  - [Boot sequence of FullMetalupdate supported boards](bootup.md)
  - [How OS and container rollbacking works](rollback.md)
  - [Benchmarking statistics of the project](benchmark.md)
- - [How to add new target to Hawkbit](add-targets-to-hawkbit.md)
+ - [How to add new targets to Hawkbit](add-targets-to-hawkbit.md)
+ - [How to configure HTTPS with Hawkbit](hawkbit-https.md)
 
 # Contribute
 
