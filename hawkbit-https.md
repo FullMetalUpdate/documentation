@@ -22,9 +22,9 @@ You will need a passphrase for `privateKey.pem`, which we will denote as #key-pa
 
 **Warning:** Password of `keyStore.p12` (ie, #p12-password) must be at least 6 characters long and contains letters AND numbers.
 
-You will then obtain a certificate `certificate.crt` (the public key is included into this certificate), a private key `privateKey.pem` and a pkcs12 binary `keyStore.p12`. this last one is a special kind of file storing cryptographic objects, in our case your certificate as well as your private key.
+You will then obtain a certificate `certificate.crt` (the public key is included into this certificate), a private key `privateKey.pem` and a pkcs12 binary `keyStore.p12`. This last one is a special kind of file storing cryptographic objects, in our case your certificate as well as your private key.
 
-**Warning:** This setup will not work for prod environments. Please reach out to
+**Warning:** This setup will not work for production environments. Please reach out to
 us [on gitter][gitter] if you need to configure proper certificates.
 
 **Coming soon:** Proper certificate generation with Let's Encrypt and certbot python tool.
@@ -40,7 +40,7 @@ This branch holds everything you need to set up Hawkbit to work with HTTPS. We w
 
 ### Converting the `p12` file into a `jks` file
 
-The Hawkbit container embeds `keytool`, the tool used to manage the Java KeyStore (JKS).
+`keytool`is a tool used to manage Java KeyStore (JKS) files.
 JavaKeyStore objects are used by Hawkbit (note that Hawkbit client is written in Java) to manage certificates. We have to use it because Hawkbit does not seem to be able to deal with pkcs12 files.
 
 Go in a the directoy where you generated `privateKey.pem`, `certificate.crt` and `keyStore.p12`.
@@ -48,20 +48,31 @@ Go in a the directoy where you generated `privateKey.pem`, `certificate.crt` and
 You can now generate the jks file :
 
 ```
+sudo apt-get install keytool
 keytool -importkeystore -srckeystore keyStore.p12 -srcstoretype pkcs12 \
         -destkeystore keyStore.jks -deststoretype pkcs12 \
-        -alias 1 -deststorepass adminVBW
+        -alias 1 -deststorepass #p12-password
 ```
 
-First, enter the destination keystore password : **this must be the same as #p12-password **. Then, enter the source keystore password : #p12-password.
+First, enter the destination keystore password : **this must be the same as #p12-password**. Then, enter the source keystore password : #p12-password.
 
-You finally get a JKS file as `keyStore.kjs`, which you can use to configure Hawkbit.
+You finally get a JKS file as `keyStore.jks`, which you can use to configure Hawkbit.
 
 ### Building new docker image fullmetalupdate/build-yocto:v2.0
 
 #### Configuring Hawkbit's options for SSL/TLS
 
-Go to your FullMetalupdate local repo `dockerfiles` and configure `hawkbit/application.properties` file with the appropriate parameters :
+Go to your FullMetalupdate local repo `dockerfiles` (or clone it on our Github) and configure `hawkbit/application.properties` file with the appropriate parameters.
+
+**1st solution : Use config.sh script**
+
+Move your JavaKeyStore file to the `hawkbit` directory.
+
+`mv /home/user/path/to/keyStore.jks hawkbit/`
+
+Run `config.sh` script and give #p12-password when it is required.
+
+**2nd solution : By hand**
 
 ```
 1) UI demo account
@@ -83,7 +94,6 @@ server.ssl.key-store=/opt/hawkbit/keyStore.jks
 server.ssl.key-password=#p12-password
 server.ssl.key-store-password=#p12-password
 ```
-
 Don't forget to replace #p12-password accordingly.
 
 #### Setting up the build
@@ -92,7 +102,6 @@ You will need to generate a new docker image based on a Dockerfile specially wri
 ```
 git clone https://github.com/FullMetalUpdate/dockerfiles.git
 git checkout add-https
-mv /home/user/path/to/keyStore.jks hawkbit/
 docker build -t "fullmetalupdate/hawkbit:v2.0" hawkbit/Dockerfile
 ```
 
@@ -133,14 +142,14 @@ Before proceeding further, **close any instanciation of the build-yocto docker**
 ```
 mv /path/to/certificate.crt /path/to/ca-certificates.crt
 docker cp /path/to/ca-certificates.crt \
-    fullmetalupdate/hawkbit:v2.0:/data/yocto/build/tmp/fullmetalupdate-os/work/x86_65-linux/curl-native/7.69.1-r0/recipe-sysroot-native/etc/ssl/certs
+    fullmetalupdate/hawkbit:v2.0:/data/yocto/build/tmp/fullmetalupdate-os/work/x86_65-linux/curl-native/7.69.1-r0/              recipe-sysroot-native/etc/ssl/certs
 ```  
 
  4. Modify a few things to leverage SSL/TLS security (our current certificate is self signed, and whether your browser, curl, or the HTTP API do not like it and fail to compile or execute beacuse of that) :
 
 First, add `-k` option to `curl` bash command in `curl_post()` Yocto function in `build/yocto/source/meta-fullmetalupdate/classes/fullmetalupdae.bbclass` file.
 
-Then, go to FMU client repo (`fullmetalupdate/`) and modify the source code in `fullmetalupdate.py`: 
+Secondly, go to FMU client repo (`fullmetalupdate/`, a repo you can clone on FullMetalUpdate Github) and modify the source code in `fullmetalupdate.py`: 
 ``` 
 @@ -76,8 +76,8 @@ async def main():
      logging.basicConfig(level=LOG_LEVEL,
@@ -158,9 +167,9 @@ Then, go to FMU client repo (`fullmetalupdate/`) and modify the source code in `
     client again. Then you can flash the new image to your target, which will contain the
     new settings.
 
- 6. After starting the target, you should see your device's new IP in the target's information panel, which we will denote as #IP.
+ 6. After starting the target, you should see your device's new IP in the target's information panel on Hawkbit Web Client, which we will denote as #IP.
 
- 7. To finish the deployment, you can use the send-file script furnished in fullmetalupdate/dev-scripts to apply the modification done to FMU client source code.
+ 7. To finish the deployment, you can use the `send-file` script furnished in FullMetalUpdate/dev-scripts to apply the modification done to FMU client source code.
 
 `./send-file.sh fullmetalupdate.py #IP`
 
@@ -177,15 +186,14 @@ steps :
 
  1. Remount `/usr` as read-write by executing: `mount -o remount,rw /usr`
 
- 1. Edit the configuration file by executing `vi
-    /usr/fullmetalupdate/rauc_hawkbit/config.cfg`
+ 1. Edit the configuration file by executing `vi /usr/fullmetalupdate/rauc_hawkbit/config.cfg`
 
  1. Make the following changes :
 
      * change `hawkbit_url_port` to `8443`
      * change `hawkbit_ssl` to `true`
 
- 1. go to FMU client repo (`fullmetalupdate/`) and modify the source code in `fullmetalupdate.py`: 
+ 1. go to FMU client repo (`fullmetalupdate/`, a repo you can clone on FullMetalUpdate Github) and modify the source code in `fullmetalupdate.py`: 
 ``` 
 @@ -76,8 +76,8 @@ async def main():
      logging.basicConfig(level=LOG_LEVEL,
