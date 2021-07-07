@@ -31,6 +31,7 @@ This file contains crucial information needed by OSTree to know which file syste
 ```
 kernel_image=/ostree/poky-<hash>/vmlinuz
 ramdisk_image=/ostree/poky-<hash>/initramfs
+fdt_file=/ostree/poky-<hash>/<machine>.dtb
 bootargs=ostree=/ostree/boot.0/poky/<hash>/0
 ```
 
@@ -41,15 +42,33 @@ When a new deployment is added, OSTree will change `/boot/loader/uEnv.txt` to :
 ```
 kernel_image=/ostree/poky-<hash>/vmlinuz
 ramdisk_image=/ostree/poky-<hash>/initramfs
+fdt_file=/ostree/poky-<hash>/<machine>.dtb
 bootargs=ostree=/ostree/boot.1/poky/<hash>/0
 kernel_image2=/ostree/poky-<hash>/vmlinuz
 ramdisk_image2=/ostree/poky-<hash>/initramfs
+fdt_file2=/ostree/poky-<hash>/<machine>.dtb
 bootargs2=ostree=/ostree/boot.1/poky/<hash>/1
 ```
 
 All the `*2` argument are the previous kernel command line arguments which were used to boot
 into the previous deployment. So by playing with *U-boot environment variables* we can make
 use of this to rollback to the previous deployment.
+
+### Device tree updates alongside the kernel
+
+OSTree is capable of updating the device tree and the kernel. Updating device trees may be
+required if an update includes a kernel update. It just needs to be shipped in `/boot` (the
+deployment's `/boot`, not the checked out `/boot`), and OSTree will include it in new
+deployment and define U-boot variables for it.
+
+These device trees are not included by default. To include them, two meta-updater
+variables are defined:
+ - `OSTREE_DEPLOY_DEVICETREE = "1"`
+ - `OSTREE_DEVICETREE = "<machine>.dtb"`
+
+The first variable should be defined in `local.conf`.
+The second variable should be *the name of the device tree to include*. To know the exact
+name of the device tree to include, look up into your machine's configuration file.
 
 ### Making use of U-boot environment variables
 
@@ -83,10 +102,14 @@ else
   replace bootargs by bootargs2
   replace kernel_image by kernel_image2
   replace ramdisk_image by ramdisk_image2
+  replace fdt_file by fdt_file2
   save u-boot environment
   boot
 end if
 ```
+
+Replacing the kernel, ramdisk, bootargs and device tree blob configures ostree to boot on
+the previous deployment if the new one has failed five times.
 
 ### How OS rollbacking works (all the steps)
 
@@ -96,9 +119,12 @@ As expected, the first thing we do is to deploy the new OS on Hawkbit. The FMU c
 polls the server, detects an update query, and goes through `process_deployment()`. At this
 point, it detects it is an OS update and will execute `update_system()`. This method does
 multiple things : 
+
  1. Deploy the new deployment in OSTree
+
  1. **Delete  the `init_var` variable**. This will allow U-boot to start from scratch and
       re-initialize its variables.
+
  1. Write a JSON file stored in `/var/local/fullmetalupdate/reboot_data.json` which
     typically looks like this : 
       ```json
